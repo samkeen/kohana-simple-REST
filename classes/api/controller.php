@@ -319,9 +319,28 @@ abstract class Api_Controller extends Kohana_Controller {
         $this->validator = Validation::factory((array)$input);
         foreach((array)static::$fields as $field_name => $rules)
         {
-            if($rules)
+            foreach((array)$rules as $index_or_rule => $rule_name_or_rule_meta)
             {
-                $this->validator->rule($field_name, Arr::get($rules, 0), Arr::get($rules, 1));
+                /*
+                 * Rule definitions can be in on of 2 forms,
+                 *  - Form A: A rule name with no rule parameters
+                 *  - Form B: A rule name with array of rule parameters
+                 * ex:
+                 * 'raw_text' => array(
+                      'not_empty',                          // Form A
+                      'max_length' => array(':value', 500)  // Form B
+                    ),
+                 */
+                if( ! is_int($index_or_rule)) // true form Form B
+                {
+                    //                                     rule name           rule meta
+                    $this->validator->rule($field_name, $index_or_rule, $rule_name_or_rule_meta);
+                }
+                else // Form A
+                {
+                    //                                         rule name
+                    $this->validator->rule($field_name, $rule_name_or_rule_meta);
+                }
             }
         }
     }
