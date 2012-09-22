@@ -21,7 +21,12 @@ There are also default implementations for GET/POST/PUT/DELETE/PATCH in the base
 
 ### Example Routes
 
-This is a simple Kohana, module so place it in you module dir, then enable it in bootstrap.php
+This is a simple Kohana, module so place it in you module dir. This can be done by simply copying the few files or as a git submodule:
+
+`git submodule add git@github.com:samkeen/kohana-simple-REST.git modules/simple_rest`
+
+
+Then enable it in bootstrap.php
 
 ```php
 <?php
