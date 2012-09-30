@@ -40,7 +40,6 @@ abstract class Api_Controller extends Kohana_Controller {
         'PATCH',
         'POST',
         'DELETE',
-        'HEAD',
         'OPTIONS',
     );
     /**
@@ -94,7 +93,7 @@ abstract class Api_Controller extends Kohana_Controller {
      */
     function action_get()
     {
-        return $this->error_response(405, 'GET method not allowed');
+        return $this->error_response(405, "GET method not allowed for Resource: '{$this->request->controller()}'");
     }
 
     /**
@@ -148,7 +147,7 @@ abstract class Api_Controller extends Kohana_Controller {
      */
     function action_put()
     {
-        return $this->error_response(405, 'PUT method not allowed for this Resource');
+        return $this->error_response(405, "PUT method not allowed for Resource: '{$this->request->controller()}'");
     }
 
     /**
@@ -159,7 +158,7 @@ abstract class Api_Controller extends Kohana_Controller {
      */
     function action_patch()
     {
-        return $this->error_response(405, 'PATCH method not allowed for this Resource');
+        return $this->error_response(405, "PATCH method not allowed for Resource: '{$this->request->controller()}'");
     }
 
     /**
@@ -170,7 +169,7 @@ abstract class Api_Controller extends Kohana_Controller {
      */
     function action_post()
     {
-        return $this->error_response(405, 'POST method not allowed for this Resource');
+        return $this->error_response(405, "POST method not allowed for Resource: '{$this->request->controller()}'");
     }
 
     /**
@@ -349,6 +348,12 @@ abstract class Api_Controller extends Kohana_Controller {
             $this->error_response(400, 'There was no PATCH data');
             return;
         }
+        $existing_resource = $this->get_persisted_resource(static::$table_name, $primary_key_value);
+        if( ! $existing_resource->count())
+        {
+            $this->error_response(404, "Resource: '{$this->request->controller()}', with identifier: '{$primary_key_value}' was not found");
+            return;
+        }
         // at this point the identifier should not be in $data
         unset($data[static::$primary_key_field]);
         $sql   = Util_Sql::build_update(static::$table_name, static::$primary_key_field, $data);
@@ -369,6 +374,9 @@ abstract class Api_Controller extends Kohana_Controller {
         }
     }
 
+    /**
+     * @param $primary_key_value
+     */
     protected function fulfill_delete_request($primary_key_value)
     {
         /**
@@ -441,17 +449,6 @@ abstract class Api_Controller extends Kohana_Controller {
     }
 
     /**
-     * Default HEAD controller for API, override in concrete /api/<controller> to
-     * provide support for HEAD in that controller
-     *
-     * Default action, throw 405 with supported methods header
-     */
-    function action_head()
-    {
-        return $this->error_response(405, 'HEAD method not allowed for this Resource');
-    }
-
-    /**
      * Default OPTIONS controller for API, override in concrete /api/<controller> to
      * provide support for OPTIONS in that controller
      *
@@ -459,7 +456,7 @@ abstract class Api_Controller extends Kohana_Controller {
      */
     function action_options()
     {
-        return $this->error_response(405, 'OPTIONS method not allowed for this Resource');
+        return $this->error_response(405, "OPTIONS method not allowed for Resource: '{$this->request->controller()}'");
     }
 
     /**
