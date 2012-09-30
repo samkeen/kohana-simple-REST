@@ -8,6 +8,9 @@
  */
 class Util_Http
 {
+    const CONTENT_TYPE_FORM_ENCODE = 'application/x-www-form-urlencoded';
+    const CONTENT_TYPE_JSON = 'application/json';
+
     public static $code_labels = array(
         200 => 'OK',
         201 => 'Created',

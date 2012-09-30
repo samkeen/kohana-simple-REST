@@ -56,7 +56,7 @@ abstract class Api_Controller extends Kohana_Controller {
     function __construct(Request $request, Response $response)
     {
         /*
-         * Set the default content type to json
+         * Set the Response HTTP Header 'Content-Type' to application/json
          */
         $response->headers('Content-Type', 'application/json');
         if(in_array(strtoupper($request->method()), $this->known_request_methods))
@@ -65,15 +65,19 @@ abstract class Api_Controller extends Kohana_Controller {
         }
         else
         {
-            $response->headers('HTTP/1.1', 400 . Util_Http::$code_labels[400]);
-            $response->body(
-                json_encode(array('__error' => array(
-                    '__message' => "HTTP Method {$request->method()} not known."
-                        . "Known method: " . implode(', ', $this->known_request_methods)
-                )))
-            );
-            $request->action('error');
+            $message = "HTTP Method {$request->method()} not known."
+                . "Known method: " . implode(', ', $this->known_request_methods);
+            $this->route_to_error($request, $response, 400, $message);
         }
+        /*
+         * Only POSTs with Content-Type = form-encode are 'auto' parsed to an array()
+         * and set to $request->post().  So for the other HTTP verbs with payloads (and
+         * POST with JSON content type), parse and set to $request->post().
+         *
+         * Easiest way to get access to that data WITHOUT overriding the Kohana
+         * Request class.
+         */
+        $this->parse_payload($request, $response);
         return parent::__construct($request, $response);
     }
 
@@ -185,8 +189,38 @@ abstract class Api_Controller extends Kohana_Controller {
      */
     protected function post_validate(array $input = array())
     {
+        /*
+         * trim off unknown fields
+         */
         $input = array_intersect_key($input, static::$fields);
         $this->init_validations($input);
+        $valid = $this->validator->check();
+        if($valid)
+        {
+            $this->validated_input = $this->validator->data();
+        }
+        return $valid;
+    }
+
+    /**
+     * @param array $input
+     * @return bool
+     */
+    protected function patch_validate(array $input = array())
+    {
+        $valid = false;
+        $requested_resource_identifier = $this->request->param('resource_id');
+        /*
+         * trim off unknown fields
+         */
+        $input = array_intersect_key($input, static::$fields);
+        $this->init_validations($input);
+        if( ! $requested_resource_identifier)
+        {
+            $this->validator->error(static::$primary_key_field,
+                "PATCH.missing_identifier");
+            return $valid;
+        }
         $valid = $this->validator->check();
         if($valid)
         {
@@ -332,14 +366,18 @@ abstract class Api_Controller extends Kohana_Controller {
     private function init_validations(array $input = array())
     {
         $this->validator = Validation::factory((array)$input);
+        /*
+         * add labels for system controller fields
+         */
+        $this->validator->label(static::$primary_key_field, static::$primary_key_field);
         foreach((array)static::$fields as $field_name => $rules)
         {
             foreach((array)$rules as $index_or_rule => $rule_name_or_rule_meta)
             {
                 /*
                  * Rule definitions can be in on of 2 forms,
-                 *  - Form A: A rule name with no rule parameters
-                 *  - Form B: A rule name with array of rule parameters
+                 *  - [Form A] Rule name with no rule parameters
+                 *  - [Form B] Rule name with array of rule parameters
                  * ex:
                  * 'raw_text' => array(
                       'not_empty',                          // Form A
@@ -358,6 +396,91 @@ abstract class Api_Controller extends Kohana_Controller {
                 }
             }
         }
+    }
+
+    /**
+     * Used internally to send error responses
+     *
+     * @param Request $request
+     * @param Response $response
+     * @param int $error_code One of Util_Http::$code_labels
+     * @param string $message
+     */
+    protected function route_to_error($request, $response, $error_code, $message)
+    {
+        $response->headers('HTTP/1.1', $error_code . Util_Http::$code_labels[$error_code]);
+        $response->body(
+            json_encode(array('__error' => array(
+                '__message' => $message
+            )))
+        );
+        $request->action('error');
+    }
+
+    /**
+     * On successful parse, this method sets the resulting array to $request->post();
+     * @param Request $request
+     * @param Response $response
+     * @return bool
+     */
+    private function parse_payload(Request $request, Response $response)
+    {
+        $successful_parse = false;
+        $parsed_payload = array();
+        $request_content_type = isset($_SERVER['CONTENT_TYPE']) ? $_SERVER['CONTENT_TYPE'] : null;
+        $request_payload_body = $request->body();
+        $request_method = $request->method();
+        /*
+         * If is a method that carries a payload, and the payload is not empty
+         */
+        if(   in_array($request_method, array('POST', 'PUT', 'PATCH', 'DELETE'))
+           && trim($request_payload_body)!='')
+        {
+            switch($request_content_type)
+            {
+                case Util_Http::CONTENT_TYPE_FORM_ENCODE:
+                    /*
+                     * if it is POST, $request->post() is already set
+                     */
+                    if( ! $request_method = 'POST')
+                    {
+                        parse_str($request_payload_body, $parsed_payload);
+                        if( ! $parsed_payload)
+                        {
+                            $message = "HTTP entity body failed to parse as '" . Util_Http::CONTENT_TYPE_FORM_ENCODE
+                                . "' Entity body received was: '{$request_payload_body}'";
+                            $this->route_to_error($request, $response, 400, $message);
+                        }
+                        else
+                        {
+                            $request->post($parsed_payload);
+                            $successful_parse = true;
+                        }
+                    }
+                    break;
+                case Util_Http::CONTENT_TYPE_JSON:
+                    $parsed_payload = json_decode($request_payload_body, $as_array=true);
+                    if(json_last_error())
+                    {
+                        $message = "HTTP entity body failed to parse as '" . Util_Http::CONTENT_TYPE_JSON
+                            . "'  Check syntax and retry request";
+                        $this->route_to_error($request, $response, 400, $message);
+                    }
+                    else
+                    {
+                        $request->post($parsed_payload);
+                        $successful_parse = true;
+                    }
+                    break;
+                default:
+                    $header_value = is_null($request_content_type) ? "<missing>" : "'{$request_content_type}'";
+                    $message = "Unknown or missing 'Content-Type' HTTP header value."
+                        . "  Value found: {$header_value}  Supported Content-Type are'"
+                        . Util_Http::CONTENT_TYPE_JSON . "' and '" . Util_Http::CONTENT_TYPE_FORM_ENCODE . "'";
+                    $this->route_to_error($request, $response, 400, $message);
+            }
+        }
+        return $successful_parse;
     }
 
 }
