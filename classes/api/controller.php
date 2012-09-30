@@ -189,6 +189,7 @@ abstract class Api_Controller extends Kohana_Controller {
      */
     protected function post_validate(array $input = array())
     {
+        $valid = false;
         /*
          * trim off unknown fields
          */
@@ -203,19 +204,22 @@ abstract class Api_Controller extends Kohana_Controller {
     }
 
     /**
+     * For PATCH, only need to validate the supplied fields
+     *
+     * @param string $resource_identifier (the pk for the Resource)
      * @param array $input
      * @return bool
      */
-    protected function patch_validate(array $input = array())
+    protected function patch_validate($resource_identifier, array $input = array())
     {
         $valid = false;
-        $requested_resource_identifier = $this->request->param('resource_id');
         /*
          * trim off unknown fields
          */
         $input = array_intersect_key($input, static::$fields);
-        $this->init_validations($input);
-        if( ! $requested_resource_identifier)
+        $this->init_validations($input, 'PATCH');
+        // Identifier in URI required for patch
+        if( ! $resource_identifier)
         {
             $this->validator->error(static::$primary_key_field,
                 "PATCH.missing_identifier");
@@ -251,18 +255,19 @@ abstract class Api_Controller extends Kohana_Controller {
     protected function fulfill_post_request()
     {
         $data = $this->validated_input;
+        // identifier should not be in $data
+        unset($data[static::$primary_key_field]);
         if( ! $data)
         {
             $this->error_response(400, 'There was no POST data');
             return;
         }
-        $sql = Util_Sql::build_insert(static::$table_name, $data);
+        $sql   = Util_Sql::build_insert(static::$table_name, $data);
         $query = DB::query(
             Database::INSERT,
             $sql
         );
-        $query_parameters = Util_Arr::prefix_array_key(':', $data);
-        $query->parameters($query_parameters);
+        $query->parameters(Util_Arr::prefix_array_key(':', $data));
         try
         {
             list($identifier, $rows_affected) = $query->execute();
@@ -277,6 +282,55 @@ abstract class Api_Controller extends Kohana_Controller {
                     )
                 )
             );
+        }
+        catch(Database_Exception $e)
+        {
+            $this->response->headers('HTTP/1.1', '500 Server Error');
+        }
+    }
+    /**
+     * Default behavior for PATCH request.  Override in Concrete Controller
+     * as needed.
+     *
+     * NOTE: as a simplification (and to keep from overriding too much Kohana
+     * code), we use request->post() to store to entity payload data for PATCH
+     *
+     * Usage:
+     * <code>
+     * function action_patch()
+     * {
+     *   if( ! $this->patch_validate($this->request->post()))
+     *   {
+     *     $this->end_with_validation_error();
+     *   }
+     *   else
+     *   {
+     *     return $this->fulfill_patch_request();
+     *   }
+     * }
+     * </code>
+     */
+    protected function fulfill_patch_request($primary_key_value)
+    {
+        $data = $this->validated_input;
+        if( ! $data)
+        {
+            $this->error_response(400, 'There was no PATCH data');
+            return;
+        }
+        // at this point the identifier should not be in $data
+        unset($data[static::$primary_key_field]);
+        $sql   = Util_Sql::build_update(static::$table_name, static::$primary_key_field, $data);
+        $query = DB::query(
+            Database::UPDATE,
+            $sql
+        );
+        $data[static::$primary_key_field] = $primary_key_value;
+        $query->parameters(Util_Arr::prefix_array_key(':', $data));
+        try
+        {
+            $query->execute();
+            $this->response->headers('HTTP/1.1', '204 No Content');
         }
         catch(Database_Exception $e)
         {
@@ -362,15 +416,22 @@ abstract class Api_Controller extends Kohana_Controller {
      * @see http://kohanaframework.org/3.2/guide/kohana/security/validation
      * @see http://kohanaframework.org/3.2/guide/api/Validation
      * @param array $input
+     * @param string $http_request_method
      */
-    private function init_validations(array $input = array())
+    private function init_validations(array $input = array(), $http_request_method='POST')
     {
         $this->validator = Validation::factory((array)$input);
         /*
          * add labels for system controller fields
          */
+        $fields_to_check = (array)static::$fields;
+        if(strtoupper($http_request_method) == 'PATCH')
+        {
+            $fields_to_check = array_intersect_key($fields_to_check, $input);
+        }
+
         $this->validator->label(static::$primary_key_field, static::$primary_key_field);
-        foreach((array)static::$fields as $field_name => $rules)
+        foreach($fields_to_check as $field_name => $rules)
         {
             foreach((array)$rules as $index_or_rule => $rule_name_or_rule_meta)
             {
@@ -442,7 +503,7 @@ abstract class Api_Controller extends Kohana_Controller {
                     /*
                      * if it is POST, $request->post() is already set
                      */
-                    if( ! $request_method = 'POST')
+                    if( $request_method != 'POST')
                     {
                         parse_str($request_payload_body, $parsed_payload);
                         if( ! $parsed_payload)
