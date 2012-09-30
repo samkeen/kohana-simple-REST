@@ -43,6 +43,11 @@ abstract class Api_Controller extends Kohana_Controller {
         'HEAD',
         'OPTIONS',
     );
+    /**
+     * @var array These are the only HTTP verbs for which we will
+     * parse an entity body and assign to $request->post().
+     */
+    private $payload_allowed_methods = array('POST', 'PUT', 'PATCH');
 
     /**
      * Sets response Content-Type to 'application/json' and checks that
@@ -107,12 +112,7 @@ abstract class Api_Controller extends Kohana_Controller {
     protected function fulfill_get_request()
     {
         $requested_resource_identifier = $this->request->param('resource_id');
-        $query = DB::select()->from(static::$table_name);
-        if($requested_resource_identifier)
-        {
-            $query->where(static::$primary_key_field, '=', $requested_resource_identifier);
-        }
-        $results = $query->execute();
+        $results = $this->get_persisted_resource(static::$table_name, $requested_resource_identifier);
         if( ! $results->count() && $requested_resource_identifier)
         {
             $this->error_response(404, "Resource with identifier [{$requested_resource_identifier}] Not Found");
@@ -126,6 +126,21 @@ abstract class Api_Controller extends Kohana_Controller {
     }
 
     /**
+     * @param $table_name
+     * @param string|null $requested_resource_identifier If null, this is a get all
+     * @return Database_MySQL_Result
+     */
+    private function get_persisted_resource($table_name, $requested_resource_identifier=null)
+    {
+        $query = DB::select()->from($table_name);
+        if($requested_resource_identifier)
+        {
+            $query->where(static::$primary_key_field, '=', $requested_resource_identifier);
+        }
+        return $query->execute();
+    }
+
+    /**
      * Default PUT controller for API, override in concrete /api/<controller> to
      * provide support for PUT in that controller
      *
@@ -133,7 +148,7 @@ abstract class Api_Controller extends Kohana_Controller {
      */
     function action_put()
     {
-        return $this->error_response(405, 'PUT method not allowed');
+        return $this->error_response(405, 'PUT method not allowed for this Resource');
     }
 
     /**
@@ -144,7 +159,7 @@ abstract class Api_Controller extends Kohana_Controller {
      */
     function action_patch()
     {
-        return $this->error_response(405, 'PATCH method not allowed');
+        return $this->error_response(405, 'PATCH method not allowed for this Resource');
     }
 
     /**
@@ -155,7 +170,7 @@ abstract class Api_Controller extends Kohana_Controller {
      */
     function action_post()
     {
-        return $this->error_response(405, 'POST method not allowed');
+        return $this->error_response(405, 'POST method not allowed for this Resource');
     }
 
     /**
@@ -288,6 +303,22 @@ abstract class Api_Controller extends Kohana_Controller {
             $this->response->headers('HTTP/1.1', '500 Server Error');
         }
     }
+
+    protected function delete_validate($resource_identifier)
+    {
+        $valid = false;
+        // Identifier in URI required for patch
+        if( ! $resource_identifier)
+        {
+            $this->validator->error(static::$primary_key_field,
+                "DELETE.missing_identifier");
+            return $valid;
+        }
+        // no validation to speak of here, still have delete_validate for consistencey
+        $valid = true;
+        return $valid;
+    }
+
     /**
      * Default behavior for PATCH request.  Override in Concrete Controller
      * as needed.
@@ -329,12 +360,42 @@ abstract class Api_Controller extends Kohana_Controller {
         $query->parameters(Util_Arr::prefix_array_key(':', $data));
         try
         {
-            $query->execute();
+            $rows_affected = $query->execute();
             $this->response->headers('HTTP/1.1', '204 No Content');
         }
         catch(Database_Exception $e)
         {
             $this->response->headers('HTTP/1.1', '500 Server Error');
+        }
+    }
+
+    protected function fulfill_delete_request($primary_key_value)
+    {
+        /**
+         * first get the existing resource from persistence
+         */
+        $existing_resource = $this->get_persisted_resource(static::$table_name, $primary_key_value);
+        if($existing_resource->count())
+        {
+            $sql   = Util_Sql::build_delete(static::$table_name, static::$primary_key_field);
+            $query = DB::query(
+                Database::DELETE,
+                $sql
+            );
+            $query->parameters(Util_Arr::prefix_array_key(':', array(static::$primary_key_field => $primary_key_value)));
+            try
+            {
+                $rows_affected = $query->execute();
+                $this->response->headers('HTTP/1.1', '204 No Content');
+            }
+            catch(Database_Exception $e)
+            {
+                $this->response->headers('HTTP/1.1', '500 Server Error');
+            }
+        }
+        else // nothing to delete
+        {
+            $this->response->headers('HTTP/1.1', '204 No Content');
         }
     }
 
@@ -376,7 +437,7 @@ abstract class Api_Controller extends Kohana_Controller {
      */
     function action_delete()
     {
-        return $this->error_response(405, 'DELETE method not allowed');
+        return $this->error_response(405, 'DELETE method not allowed for this Resource');
     }
 
     /**
@@ -387,7 +448,7 @@ abstract class Api_Controller extends Kohana_Controller {
      */
     function action_head()
     {
-        return $this->error_response(405, 'HEAD method not allowed');
+        return $this->error_response(405, 'HEAD method not allowed for this Resource');
     }
 
     /**
@@ -398,7 +459,7 @@ abstract class Api_Controller extends Kohana_Controller {
      */
     function action_options()
     {
-        return $this->error_response(405, 'OPTIONS method not allowed');
+        return $this->error_response(405, 'OPTIONS method not allowed for this Resource');
     }
 
     /**
@@ -494,7 +555,7 @@ abstract class Api_Controller extends Kohana_Controller {
         /*
          * If is a method that carries a payload, and the payload is not empty
          */
-        if(   in_array($request_method, array('POST', 'PUT', 'PATCH', 'DELETE'))
+        if(   in_array($request_method, $this->payload_allowed_methods)
            && trim($request_payload_body)!='')
         {
             switch($request_content_type)

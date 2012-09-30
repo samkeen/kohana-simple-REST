@@ -45,4 +45,16 @@ class Util_Sql
         return "UPDATE `{$table_name}` {$fields_set_statements} {$where_statement}";
     }
 
+    /**
+     * @param string $table_name
+     * @param string $identifier_field
+     * @return string
+     */
+    static function build_delete($table_name, $identifier_field)
+    {
+        // DELETE FROM `ingredient_spellchanges` WHERE `id` = '2';
+        $where_statement = "WHERE `{$identifier_field}` = :{$identifier_field}";
+        return "DELETE FROM `{$table_name}` {$where_statement}";
+    }
+
 }
