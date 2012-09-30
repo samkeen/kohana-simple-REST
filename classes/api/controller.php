@@ -1,5 +1,10 @@
 <?php defined('SYSPATH') or die('No direct script access.');
-
+/**
+ * All the base Request method actions return
+ *    $this->error_response(405, 'GET method not allowed');
+ * To have your controller support a given HTTP verb, override that method
+ * in the concrete class
+ */
 abstract class Api_Controller extends Kohana_Controller {
 
     /**
@@ -39,6 +44,15 @@ abstract class Api_Controller extends Kohana_Controller {
         'OPTIONS',
     );
 
+    /**
+     * Sets response Content-Type to 'application/json' and checks that
+     * the request method is one of the supported HTTP request
+     * methods ($this->known_request_methods).  If it is, sets
+     * $this->action to Request::method()
+     *
+     * @param Request $request
+     * @param Response $response
+     */
     function __construct(Request $request, Response $response)
     {
         /*
@@ -79,11 +93,12 @@ abstract class Api_Controller extends Kohana_Controller {
      *
      * Usage in concrete Controllers
      *
+     * <code>
      *  function action_get()
      *  {
      *    return parent::fulfill_get_request();
      *  }
-     *
+     * </code>
      */
     protected function fulfill_get_request()
     {

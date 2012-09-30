@@ -118,3 +118,8 @@ class Controller_Api_Users extends Api_Controller {
 	}
 }
 ```
+
+Note: All the base controller (`Api_Controller`) action methods for HTTP verbs (i.e. `action_get`) return 405
+    $this->error_response(405, 'GET method not allowed');
+To have your controller support a given HTTP verb, override that method in the concrete class and provide an implementation
+such as the example above.
