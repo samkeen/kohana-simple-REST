@@ -63,9 +63,17 @@ abstract class Api_Controller extends Kohana_Controller {
          * Set the Response HTTP Header 'Content-Type' to application/json
          */
         $response->headers('Content-Type', 'application/json');
-        if(in_array(strtoupper($request->method()), $this->known_request_methods))
+        
+        /*
+         * Check for the x-http-method-override header because most browsers don't
+         * natively support PUT, PATCH, and DELETE.
+         */
+        $method_override = $request->headers('X-HTTP-Method-Override');
+        $method = strtoupper(($method_override ?: $request->method()));
+        
+        if(in_array(strtoupper($method), $this->known_request_methods))
         {
-            $request->action(strtolower($request->method()));
+            $request->action(strtolower($method);
         }
         else
         {
